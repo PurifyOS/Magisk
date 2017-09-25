@@ -1,10 +1,9 @@
 LOCAL_PATH := $(call my-dir)
 
 # Some handy paths
-JNI_ROOT := jni
-SELINUX_PATH := jni/external/selinux
-COMPRESS_LIB := jni/external/ndk-compression
-DTC_PATH := jni/external/dtc
+SELINUX_PATH := external/selinux
+COMPRESS_LIB := external/ndk-compression
+DTC_PATH := external/dtc
 LIBSELINUX := $(SELINUX_PATH)/libselinux/include
 LIBSEPOL := $(SELINUX_PATH)/libsepol/include $(SELINUX_PATH)/libsepol/cil/include
 LIBZ := $(COMPRESS_LIB)/zlib
@@ -24,8 +23,8 @@ LOCAL_STATIC_LIBRARIES := libsepol
 LOCAL_SHARED_LIBRARIES := libsqlite libselinux
 
 LOCAL_C_INCLUDES := \
-	jni/include \
-	jni/external \
+	include \
+	external \
 	$(LIBSELINUX) \
 	$(LIBSEPOL)
 
@@ -66,7 +65,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := magiskboot
 LOCAL_STATIC_LIBRARIES := libz liblzma liblz4 libbz2 libfdt
 LOCAL_C_INCLUDES := \
-	jni/include \
+	include \
 	$(LIBZ) \
 	$(LIBLZMA) \
 	$(LIBLZ4) \
@@ -108,20 +107,12 @@ endif
 # 32-bit static binaries
 ifneq ($(TARGET_ARCH_ABI), x86_64)
 ifneq ($(TARGET_ARCH_ABI), arm64-v8a)
-# b64xz
-include $(CLEAR_VARS)
-LOCAL_MODULE := b64xz
-LOCAL_STATIC_LIBRARIES := liblzma
-LOCAL_C_INCLUDES := $(LIBLZMA)
-LOCAL_SRC_FILES := b64xz.c
-LOCAL_LDFLAGS := -static
-include $(BUILD_EXECUTABLE)
 # Busybox
-include jni/external/busybox/Android.mk
+include external/busybox/Android.mk
 endif
 endif
 
 ########################
 # Externals
 ########################
-include jni/external/Android.mk
+include external/Android.mk
