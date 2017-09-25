@@ -2,6 +2,3 @@ obj/
 libs/
 *.zip
 *.jks
-
-# Copied binaries
-ziptools/zipadjust
