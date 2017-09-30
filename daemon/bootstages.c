@@ -276,14 +276,21 @@ static void clone_skeleton(struct node_entry *node) {
 	}
 	closedir(dir);
 
-	snprintf(buf, PATH_MAX, "%s%s", DUMMDIR, full_path);
-	mkdir_p(buf, 0755);
-	clone_attr(full_path, buf);
-	if (node->status & IS_SKEL)
-		bind_mount(buf, full_path);
+	if (node->status & IS_SKEL) {
+		struct stat s;
+		char *con;
+		xstat(full_path, &s);
+		getfilecon(full_path, &con);
+		LOGI("tmpfs: %s\n", full_path);
+		mount("tmpfs", full_path, "tmpfs", 0, NULL);
+		chmod(full_path, s.st_mode & 0777);
+		chown(full_path, s.st_uid, s.st_gid);
+		setfilecon(full_path, con);
+		free(con);
+	}
 
 	vec_for_each(node->children, child) {
-		snprintf(buf, PATH_MAX, "%s%s/%s", DUMMDIR, full_path, child->name);
+		snprintf(buf, PATH_MAX, "%s/%s", full_path, child->name);
 
 		// Create the dummy file/directory
 		if (IS_DIR(child))
@@ -303,7 +310,7 @@ static void clone_skeleton(struct node_entry *node) {
 			// Mount from module file to dummy file
 			snprintf(buf2, PATH_MAX, "%s/%s%s/%s", MOUNTPOINT, child->module, full_path, child->name);
 		} else if (child->status & (IS_SKEL | IS_INTER)) {
-			// It's a intermediate folder, recursive clone
+			// It's an intermediate folder, recursive clone
 			clone_skeleton(child);
 			continue;
 		} else if (child->status & IS_DUMMY) {
@@ -315,7 +322,7 @@ static void clone_skeleton(struct node_entry *node) {
 			// Copy symlinks directly
 			cp_afc(buf2, buf);
 			#ifdef MAGISK_DEBUG
-				LOGD("cplink: %s -> %s\n",buf2, buf);
+				LOGI("cplink: %s -> %s\n",buf2, buf);
 			#else
 				LOGI("cplink: %s\n", buf);
 			#endif
@@ -414,7 +421,7 @@ static void mount_mirrors() {
 			xmkdir_p(MIRRDIR "/system", 0755);
 			xmount(buf, MIRRDIR "/system", "ext4", MS_RDONLY, NULL);
 			#ifdef MAGISK_DEBUG
-				LOGD("mount: %s -> %s\n", buf, MIRRDIR "/system");
+				LOGI("mount: %s -> %s\n", buf, MIRRDIR "/system");
 			#else
 				LOGI("mount: %s\n", MIRRDIR "/system");
 			#endif
@@ -426,7 +433,7 @@ static void mount_mirrors() {
 			xmkdir_p(MIRRDIR "/vendor", 0755);
 			xmount(buf, MIRRDIR "/vendor", "ext4", MS_RDONLY, NULL);
 			#ifdef MAGISK_DEBUG
-				LOGD("mount: %s -> %s\n", buf, MIRRDIR "/vendor");
+				LOGI("mount: %s -> %s\n", buf, MIRRDIR "/vendor");
 			#else
 				LOGI("mount: %s\n", MIRRDIR "/vendor");
 			#endif
@@ -437,7 +444,7 @@ static void mount_mirrors() {
 	if (!seperate_vendor) {
 		symlink(MIRRDIR "/system/vendor", MIRRDIR "/vendor");
 		#ifdef MAGISK_DEBUG
-			LOGD("link: %s -> %s\n", MIRRDIR "/system/vendor", MIRRDIR "/vendor");
+			LOGI("link: %s -> %s\n", MIRRDIR "/system/vendor", MIRRDIR "/vendor");
 		#else
 			LOGI("link: %s\n", MIRRDIR "/vendor");
 		#endif
@@ -453,12 +460,9 @@ static void link_busybox() {
 }
 
 static int prepare_img() {
-	int new_img = 0;
-
 	if (access(MAINIMG, F_OK) == -1) {
 		if (create_img(MAINIMG, 64))
 			return 1;
-		new_img = 1;
 	}
 
 	LOGI("* Mounting " MAINIMG "\n");
@@ -469,45 +473,44 @@ static int prepare_img() {
 
 	vec_init(&module_list);
 
-	if (new_img) {
-		xmkdir(COREDIR, 0755);
-		xmkdir(COREDIR "/post-fs-data.d", 0755);
-		xmkdir(COREDIR "/service.d", 0755);
-		xmkdir(COREDIR "/props", 0755);
-	} else {
-		DIR *dir = xopendir(MOUNTPOINT);
-		struct dirent *entry;
-		while ((entry = xreaddir(dir))) {
-			if (entry->d_type == DT_DIR) {
-				if (strcmp(entry->d_name, ".") == 0 ||
-					strcmp(entry->d_name, "..") == 0 ||
-					strcmp(entry->d_name, ".core") == 0 ||
-					strcmp(entry->d_name, "lost+found") == 0)
-					continue;
-				snprintf(buf, PATH_MAX, "%s/%s/remove", MOUNTPOINT, entry->d_name);
-				if (access(buf, F_OK) == 0) {
-					snprintf(buf, PATH_MAX, "%s/%s", MOUNTPOINT, entry->d_name);
-					exec_command_sync(BBPATH "/rm", "-rf", buf, NULL);
-					continue;
-				}
-				snprintf(buf, PATH_MAX, "%s/%s/disable", MOUNTPOINT, entry->d_name);
-				if (access(buf, F_OK) == 0)
-					continue;
-				vec_push_back(&module_list, strdup(entry->d_name));
+	xmkdir(COREDIR, 0755);
+	xmkdir(COREDIR "/post-fs-data.d", 0755);
+	xmkdir(COREDIR "/service.d", 0755);
+	xmkdir(COREDIR "/props", 0755);
+
+	DIR *dir = xopendir(MOUNTPOINT);
+	struct dirent *entry;
+	while ((entry = xreaddir(dir))) {
+		if (entry->d_type == DT_DIR) {
+			if (strcmp(entry->d_name, ".") == 0 ||
+				strcmp(entry->d_name, "..") == 0 ||
+				strcmp(entry->d_name, ".core") == 0 ||
+				strcmp(entry->d_name, "lost+found") == 0)
+				continue;
+			snprintf(buf, PATH_MAX, "%s/%s/remove", MOUNTPOINT, entry->d_name);
+			if (access(buf, F_OK) == 0) {
+				snprintf(buf, PATH_MAX, "%s/%s", MOUNTPOINT, entry->d_name);
+				exec_command_sync(BBPATH "/rm", "-rf", buf, NULL);
+				continue;
 			}
+			snprintf(buf, PATH_MAX, "%s/%s/disable", MOUNTPOINT, entry->d_name);
+			if (access(buf, F_OK) == 0)
+				continue;
+			vec_push_back(&module_list, strdup(entry->d_name));
 		}
-
-		closedir(dir);
-
-		// Trim image
-		umount_image(MOUNTPOINT, magiskloop);
-		free(magiskloop);
-		trim_img(MAINIMG);
-
-		// Remount them back :)
-		magiskloop = mount_image(MAINIMG, MOUNTPOINT);
-		free(magiskloop);
 	}
+
+	closedir(dir);
+
+	// Trim image
+	umount_image(MOUNTPOINT, magiskloop);
+	free(magiskloop);
+	trim_img(MAINIMG);
+
+	// Remount them back :)
+	magiskloop = mount_image(MAINIMG, MOUNTPOINT);
+	free(magiskloop);
+
 	return 0;
 }
 
@@ -563,10 +566,10 @@ void post_fs_data(int client) {
 	monitor_logs();
 
 #ifdef MAGISK_DEBUG
-	// Start debug logs in new process
+	// Log everything initially
 	debug_log_fd = xopen(DEBUG_LOG, O_WRONLY | O_CREAT | O_CLOEXEC | O_TRUNC, 0644);
-	debug_log_pid = exec_command(0, &debug_log_fd, NULL, "logcat", "-v", "brief", NULL);
-	close(debug_log_fd);
+	xwrite(debug_log_fd, "Boot logs:\n", 11);
+	debug_log_pid = exec_command(0, &debug_log_fd, NULL, "logcat", "-v", "thread", NULL);
 #endif
 
 	LOGI("** post-fs-data mode running\n");
@@ -769,5 +772,8 @@ core_only:
 	// Stop recording the boot logcat after every boot task is done
 	kill(debug_log_pid, SIGTERM);
 	waitpid(debug_log_pid, NULL, 0);
+	// Then start to log Magisk verbosely
+	xwrite(debug_log_fd, "\nVerbose logs:\n", 15);
+	debug_log_pid = exec_command(0, &debug_log_fd, NULL, "logcat", "-v", "thread", "-s", "Magisk", NULL);
 #endif
 }
